@@ -229,7 +229,6 @@
     }
 
     function renderSide(side, data) {
-      document.getElementById(`${side}Team`).textContent = `Source: ${data.team.name}`;
       const r = data.recommendation;
       document.getElementById(`${side}Title`).textContent = r.year ? `${r.title} (${r.year})` : r.title;
       document.getElementById(`${side}Description`).textContent = r.description;
@@ -321,13 +320,11 @@
       const searchInput = document.getElementById("movieSearch");
       const dropdown = document.getElementById("movieDropdown");
 
-      searchInput.addEventListener("input", () => {
+      function updateDropdown() {
         const q = searchInput.value.trim().toLowerCase();
         dropdown.innerHTML = "";
-        if (!q) { dropdown.classList.add("hidden"); return; }
         const matches = allMovies
-          .filter(m => m.title.toLowerCase().includes(q) && !selectedMovies.find(s => s.tmdb_id === m.tmdb_id))
-          .slice(0, 12);
+          .filter(m => !selectedMovies.find(s => s.tmdb_id === m.tmdb_id) && (!q || m.title.toLowerCase().includes(q)));
         if (!matches.length) { dropdown.classList.add("hidden"); return; }
         matches.forEach(m => {
           const li = document.createElement("li");
@@ -341,7 +338,10 @@
           dropdown.appendChild(li);
         });
         dropdown.classList.remove("hidden");
-      });
+      }
+
+      searchInput.addEventListener("input", updateDropdown);
+      searchInput.addEventListener("focus", updateDropdown);
 
       document.addEventListener("click", e => {
         if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {

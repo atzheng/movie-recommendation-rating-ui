@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Movie Judge UI</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #0f766e;
+      --accent-2: #0b5f57;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef6ff 0%, #f5f7fb 42%, #f9fafb 100%);
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+      padding: 1.2rem;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    h1 { margin: 0; font-size: 1.35rem; }
+    .sub { margin: 0.3rem 0 0; color: var(--muted); }
+    .next {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 0.6rem 0.95rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+    @media (min-width: 900px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.95rem;
+      display: grid;
+      gap: 0.8rem;
+    }
+    .pick {
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.7rem 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+    }
+    .pick:hover { background: var(--accent-2); }
+    .pick:disabled { opacity: 0.6; cursor: not-allowed; }
+    .movie {
+      display: grid;
+      gap: 0.8rem;
+    }
+    h2 { margin: 0; font-size: 1.15rem; }
+    p { margin: 0.55rem 0; line-height: 1.42; }
+    small { color: var(--muted); }
+    .status {
+      margin-top: 1rem;
+      border: 1px solid #bae6fd;
+      background: #ecfeff;
+      border-radius: 10px;
+      padding: 0.75rem 0.95rem;
+    }
+    .status.ok {
+      border-color: #99f6e4;
+      background: #f0fdfa;
+      color: #0f766e;
+    }
+    .prefs-box {
+      margin-bottom: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 0.8rem 0.95rem;
+      display: grid;
+      gap: 0.8rem;
+    }
+    @media (min-width: 900px) {
+      .prefs-box { grid-template-columns: 1fr 1fr; }
+    }
+    .prefs-section label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      font-size: 0.9rem;
+    }
+    .prefs-section textarea {
+      width: 100%;
+      min-height: 80px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.5rem 0.6rem;
+      font: inherit;
+      resize: vertical;
+    }
+    .movie-picker { position: relative; }
+    .movie-search {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.5rem 0.6rem;
+      font: inherit;
+    }
+    .movie-dropdown {
+      position: absolute;
+      z-index: 100;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      width: 100%;
+      max-height: 220px;
+      overflow-y: auto;
+      list-style: none;
+      margin: 2px 0 0;
+      padding: 0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .movie-dropdown.hidden { display: none; }
+    .movie-dropdown li {
+      padding: 0.45rem 0.7rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .movie-dropdown li:hover { background: #f0fdfa; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.5rem;
+    }
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: #f0fdfa;
+      border: 1px solid #99f6e4;
+      border-radius: 20px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.82rem;
+      color: #0f766e;
+    }
+    .chip button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #0f766e;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>Choose your preferred recommendation</h1>
+        <p class="sub">Student codename: <strong>{{ codename }}</strong></p>
+      </div>
+      <button id="nextBtn" class="next">Load new pair</button>
+    </div>
+    <div class="prefs-box">
+      <div class="prefs-section">
+        <label for="prefsBlurb">What do you like?</label>
+        <textarea id="prefsBlurb" placeholder="e.g. I love tense thrillers and smart sci-fi with morally complex characters"></textarea>
+      </div>
+      <div class="prefs-section">
+        <label>Movies you've liked</label>
+        <div class="movie-picker">
+          <input id="movieSearch" type="text" class="movie-search" placeholder="Search titles..." autocomplete="off" />
+          <ul id="movieDropdown" class="movie-dropdown hidden"></ul>
+        </div>
+        <div id="selectedChips" class="chips"></div>
+      </div>
+    </div>
+    <div class="grid">
+      <section class="card">
+        <button id="leftPick" class="pick">Thumbs Up This Recommendation</button>
+        <div class="movie">
+          <small id="leftTeam"></small>
+          <h2 id="leftTitle"></h2>
+          <p id="leftDescription"></p>
+        </div>
+      </section>
+      <section class="card">
+        <button id="rightPick" class="pick">Thumbs Up This Recommendation</button>
+        <div class="movie">
+          <small id="rightTeam"></small>
+          <h2 id="rightTitle"></h2>
+          <p id="rightDescription"></p>
+        </div>
+      </section>
+    </div>
+    <div id="status" class="status">Loading round...</div>
+  </div>
+  <script>
+    const codename = {{ codename_json | safe }};
+    const allMovies = {{ movies_json | safe }};
+    let selectedMovies = [];
+    let currentRound = null;
+    let isSaving = false;
+    const statusEl = document.getElementById("status");
+    const nextBtn = document.getElementById("nextBtn");
+
+    function setDisabled(disabled) {
+      document.getElementById("leftPick").disabled = disabled;
+      document.getElementById("rightPick").disabled = disabled;
+      nextBtn.disabled = disabled;
+    }
+
+    function renderSide(side, data) {
+      document.getElementById(`${side}Team`).textContent = `Source: ${data.team.name}`;
+      const r = data.recommendation;
+      document.getElementById(`${side}Title`).textContent = r.year ? `${r.title} (${r.year})` : r.title;
+      document.getElementById(`${side}Description`).textContent = r.description;
+    }
+
+    function buildPreferences() {
+      const blurb = document.getElementById("prefsBlurb").value.trim();
+      const movieLabels = selectedMovies.map(m => m.year ? `${m.title} (${m.year})` : m.title).join(", ");
+      const parts = [];
+      if (blurb) parts.push(blurb);
+      if (movieLabels) parts.push("Liked movies: " + movieLabels);
+      return parts.join("\n\n");
+    }
+
+    async function loadRound() {
+      const prefs = buildPreferences();
+      if (!prefs) {
+        statusEl.className = "status";
+        statusEl.textContent = "Please describe what you like or select some liked movies above.";
+        return;
+      }
+      setDisabled(true);
+      statusEl.className = "status";
+      statusEl.textContent = "Fetching two random team APIs...";
+      try {
+        const url = `/api/session/${encodeURIComponent(codename)}/round?preferences=${encodeURIComponent(prefs)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        currentRound = data;
+        renderSide("left", data.left);
+        renderSide("right", data.right);
+        statusEl.textContent = "Pick whichever recommendation is better.";
+      } catch (err) {
+        statusEl.textContent = `Could not load round: ${err.message}`;
+      } finally {
+        setDisabled(false);
+      }
+    }
+
+    async function vote(side) {
+      if (!currentRound || isSaving) return;
+      isSaving = true;
+      setDisabled(true);
+      statusEl.className = "status";
+      statusEl.textContent = "Saving your vote...";
+      try {
+        const res = await fetch(`/api/session/${encodeURIComponent(codename)}/vote`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            round_id: currentRound.round_id,
+            winner_side: side,
+            left: currentRound.left,
+            right: currentRound.right,
+            preferences: currentRound.preferences || ""
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        statusEl.className = "status ok";
+        statusEl.textContent = "Vote saved. Loading next pair...";
+        await loadRound();
+      } catch (err) {
+        statusEl.textContent = `Could not save vote: ${err.message}`;
+      } finally {
+        isSaving = false;
+        setDisabled(false);
+      }
+    }
+
+    function renderChips() {
+      const container = document.getElementById("selectedChips");
+      container.innerHTML = "";
+      selectedMovies.forEach(m => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        const label = m.year ? `${m.title} (${m.year})` : m.title;
+        chip.innerHTML = `${label} <button aria-label="Remove">&times;</button>`;
+        chip.querySelector("button").addEventListener("click", () => {
+          selectedMovies = selectedMovies.filter(x => x.tmdb_id !== m.tmdb_id);
+          renderChips();
+        });
+        container.appendChild(chip);
+      });
+    }
+
+    function setupMoviePicker() {
+      const searchInput = document.getElementById("movieSearch");
+      const dropdown = document.getElementById("movieDropdown");
+
+      searchInput.addEventListener("input", () => {
+        const q = searchInput.value.trim().toLowerCase();
+        dropdown.innerHTML = "";
+        if (!q) { dropdown.classList.add("hidden"); return; }
+        const matches = allMovies
+          .filter(m => m.title.toLowerCase().includes(q) && !selectedMovies.find(s => s.tmdb_id === m.tmdb_id))
+          .slice(0, 12);
+        if (!matches.length) { dropdown.classList.add("hidden"); return; }
+        matches.forEach(m => {
+          const li = document.createElement("li");
+          li.textContent = m.year ? `${m.title} (${m.year})` : m.title;
+          li.addEventListener("click", () => {
+            selectedMovies.push(m);
+            renderChips();
+            searchInput.value = "";
+            dropdown.classList.add("hidden");
+          });
+          dropdown.appendChild(li);
+        });
+        dropdown.classList.remove("hidden");
+      });
+
+      document.addEventListener("click", e => {
+        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+          dropdown.classList.add("hidden");
+        }
+      });
+    }
+
+    async function initPrefs() {
+      try {
+        const res = await fetch(`/api/session/${encodeURIComponent(codename)}/preferences`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.preferences) {
+            document.getElementById("prefsBlurb").value = data.preferences;
+          }
+        }
+      } catch (_) {}
+    }
+
+    document.getElementById("leftPick").addEventListener("click", () => vote("left"));
+    document.getElementById("rightPick").addEventListener("click", () => vote("right"));
+    nextBtn.addEventListener("click", loadRound);
+    setupMoviePicker();
+    initPrefs().then(loadRound);
+  </script>
+</body>
+</html>

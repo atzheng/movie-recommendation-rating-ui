@@ -25,10 +25,6 @@
     }
     .wrap { max-width: 1180px; margin: 0 auto; }
     .top {
-      display: flex;
-      justify-content: space-between;
-      gap: 1rem;
-      align-items: center;
       margin-bottom: 1rem;
     }
     h1 { margin: 0; font-size: 1.35rem; }
@@ -40,6 +36,7 @@
       padding: 0.6rem 0.95rem;
       cursor: pointer;
       font-weight: 600;
+      margin-top: 0.8rem;
     }
     .grid {
       display: grid;
@@ -56,6 +53,18 @@
       padding: 0.95rem;
       display: grid;
       gap: 0.8rem;
+      transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  box-shadow 0.35s ease,
+                  border-color 0.25s ease;
+    }
+    .card.winner {
+      transform: scale(1.04);
+      box-shadow: 0 8px 32px rgba(15, 118, 110, 0.25);
+      border-color: #0f766e;
+    }
+    .card.loser {
+      transform: scale(0.97);
+      opacity: 0.5;
     }
     .pick {
       border: none;
@@ -63,9 +72,10 @@
       background: var(--accent);
       color: #fff;
       padding: 0.7rem 0.8rem;
-      font-weight: 700;
+      font-size: 1.3rem;
       cursor: pointer;
       width: 100%;
+      transition: background 0.15s;
     }
     .pick:hover { background: var(--accent-2); }
     .pick:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -170,19 +180,86 @@
       line-height: 1;
       padding: 0;
     }
+    /* Student ID gate */
+    .id-gate {
+      max-width: 400px;
+      margin: 5rem auto 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 2rem;
+    }
+    .id-gate h1 { text-align: center; margin-bottom: 0.3rem; font-size: 1.3rem; }
+    .id-gate p { text-align: center; color: var(--muted); margin: 0 0 1.4rem; font-size: 0.92rem; }
+    .id-gate input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      font: inherit;
+      font-size: 1rem;
+      margin-bottom: 0.7rem;
+    }
+    .id-gate .btn-start {
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.7rem;
+      font: inherit;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .id-gate .btn-start:hover { background: var(--accent-2); }
+    .id-gate .id-error { color: #991b1b; font-size: 0.88rem; margin-top: 0.5rem; text-align: center; min-height: 1.2em; }
+    .main-ui { display: none; }
+    .main-ui.visible { display: block; }
+    .student-badge {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+    .student-badge strong { color: var(--ink); }
+    @keyframes thumbPop {
+      0%   { transform: scale(1); }
+      40%  { transform: scale(1.5) rotate(-10deg); }
+      70%  { transform: scale(1.3) rotate(8deg); }
+      100% { transform: scale(1); }
+    }
+    .pick.voted {
+      animation: thumbPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
   </style>
 </head>
 <body>
+  <!-- Student ID gate -->
+  <div id="idGate" class="id-gate">
+    <h1>Movie Judge</h1>
+    <p>Enter your student ID to begin.</p>
+    <input id="studentIdInput" type="text" placeholder="Student ID" autocomplete="off" />
+    <button class="btn-start" id="startBtn">Start</button>
+    <div id="idError" class="id-error"></div>
+  </div>
+
+  <!-- Main judging UI (hidden until student ID validated) -->
+  <div id="mainUi" class="main-ui">
   <div class="wrap">
     <div class="top">
-      <div>
-        <h1>Choose your preferred recommendation</h1>
-      </div>
-      <button id="nextBtn" class="next">Load new pair</button>
+      <h1>Choose your preferred recommendation</h1>
+      <div id="studentBadge" class="student-badge"></div>
     </div>
     <div class="prefs-box">
+        <h2 id="org7d31714"><span class="section-number-2">1.</span> Tell the algorithm about yourself.</h2>
+        <div class="outline-text-2" id="text-1">
+            <ul class="org-ul">
+                <li>Feel free to modify as you go to get better recommendations.</li>
+                <li>Be detailed. The more you tell it the better it will be!</li>
+            </ul>
+        </div>
       <div class="prefs-section">
-        <label for="prefsBlurb">What do you like?</label>
+        <label for="prefsBlurb">What kinds of movies do you like?</label>
         <textarea id="prefsBlurb" placeholder="e.g. I love tense thrillers and smart sci-fi with morally complex characters"></textarea>
       </div>
       <div class="prefs-section">
@@ -193,18 +270,19 @@
         </div>
         <div id="selectedChips" class="chips"></div>
       </div>
+    <button id="nextBtn" class="next">Save and Begin</button>
     </div>
-    <div class="grid">
-      <section class="card">
-        <button id="leftPick" class="pick">Thumbs Up This Recommendation</button>
+    <div class="grid" style="margin-top: 1rem;">
+      <section class="card" id="leftCard">
+        <button id="leftPick" class="pick">👍</button>
         <div class="movie">
           <small id="leftTeam"></small>
           <h2 id="leftTitle"></h2>
           <p id="leftDescription"></p>
         </div>
       </section>
-      <section class="card">
-        <button id="rightPick" class="pick">Thumbs Up This Recommendation</button>
+      <section class="card" id="rightCard">
+        <button id="rightPick" class="pick">👍</button>
         <div class="movie">
           <small id="rightTeam"></small>
           <h2 id="rightTitle"></h2>
@@ -212,15 +290,57 @@
         </div>
       </section>
     </div>
-    <div id="status" class="status">Loading round...</div>
+    <div id="status" class="status">Click "Save and Begin" to start!</div>
   </div>
+  </div> <!-- /main-ui -->
   <script>
     const allMovies = {{ movies_json | safe }};
     let selectedMovies = [];
     let currentRound = null;
     let isSaving = false;
+    let currentStudent = null;  // { student_id, name, team_id }
     const statusEl = document.getElementById("status");
     const nextBtn = document.getElementById("nextBtn");
+
+    // ── Student ID gate ──
+
+    async function tryStartSession(studentId) {
+      const errEl = document.getElementById("idError");
+      errEl.textContent = "";
+      if (!studentId) { errEl.textContent = "Please enter your student ID."; return; }
+      try {
+        const res = await fetch(`/api/students/${encodeURIComponent(studentId)}`);
+        if (!res.ok) { errEl.textContent = "Student ID not found. Check with your instructor."; return; }
+        currentStudent = await res.json();
+        localStorage.setItem("judge_student_id", currentStudent.student_id);
+        showMainUi();
+      } catch (e) {
+        errEl.textContent = "Could not reach server. Try again.";
+      }
+    }
+
+    function showMainUi() {
+      document.getElementById("idGate").style.display = "none";
+      document.getElementById("mainUi").classList.add("visible");
+      const badge = document.getElementById("studentBadge");
+      badge.innerHTML = `Signed in as <strong>${esc(currentStudent.name)}</strong> (${esc(currentStudent.student_id)})` +
+        (currentStudent.team_id ? ` &mdash; Team ${esc(currentStudent.team_id)}` : "");
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    document.getElementById("startBtn").addEventListener("click", () => {
+      tryStartSession(document.getElementById("studentIdInput").value.trim());
+    });
+    document.getElementById("studentIdInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") tryStartSession(document.getElementById("studentIdInput").value.trim());
+    });
+
+    // Restore saved student ID
+    const savedStudentId = localStorage.getItem("judge_student_id");
+    if (savedStudentId) tryStartSession(savedStudentId);
 
     function setDisabled(disabled) {
       document.getElementById("leftPick").disabled = disabled;
@@ -232,6 +352,11 @@
       const r = data.recommendation;
       document.getElementById(`${side}Title`).textContent = r.year ? `${r.title} (${r.year})` : r.title;
       document.getElementById(`${side}Description`).textContent = r.description;
+    }
+
+    function clearCardStates() {
+      document.getElementById("leftCard").classList.remove("winner", "loser");
+      document.getElementById("rightCard").classList.remove("winner", "loser");
     }
 
     function buildPreferences() {
@@ -250,6 +375,7 @@
         statusEl.textContent = "Please describe what you like or select some liked movies above.";
         return;
       }
+      clearCardStates();
       setDisabled(true);
       statusEl.className = "status";
       statusEl.textContent = "Fetching two random team APIs...";
@@ -273,6 +399,14 @@
       if (!currentRound || isSaving) return;
       isSaving = true;
       setDisabled(true);
+
+      // Animate the chosen button and highlight winner/loser cards
+      const pickedBtn = document.getElementById(`${side}Pick`);
+      pickedBtn.classList.add("voted");
+      pickedBtn.addEventListener("animationend", () => pickedBtn.classList.remove("voted"), { once: true });
+      document.getElementById(`${side}Card`).classList.add("winner");
+      document.getElementById(`${side === "left" ? "right" : "left"}Card`).classList.add("loser");
+
       statusEl.className = "status";
       statusEl.textContent = "Saving your vote...";
       try {
@@ -284,20 +418,28 @@
             winner_side: side,
             left: currentRound.left,
             right: currentRound.right,
-            preferences: currentRound.preferences || ""
+            preferences: currentRound.preferences || "",
+            student_id: currentStudent ? currentStudent.student_id : ""
           })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         statusEl.className = "status ok";
         statusEl.textContent = "Vote saved. Loading next pair...";
+        await new Promise(r => setTimeout(r, 600));
         await loadRound();
       } catch (err) {
         statusEl.textContent = `Could not save vote: ${err.message}`;
+        clearCardStates();
       } finally {
         isSaving = false;
         setDisabled(false);
       }
+    }
+
+    function savePrefs() {
+      localStorage.setItem("judge_blurb", document.getElementById("prefsBlurb").value);
+      localStorage.setItem("judge_movies", JSON.stringify(selectedMovies));
     }
 
     function renderChips() {
@@ -311,6 +453,7 @@
         chip.querySelector("button").addEventListener("click", () => {
           selectedMovies = selectedMovies.filter(x => x.tmdb_id !== m.tmdb_id);
           renderChips();
+          savePrefs();
         });
         container.appendChild(chip);
       });
@@ -332,6 +475,7 @@
           li.addEventListener("click", () => {
             selectedMovies.push(m);
             renderChips();
+            savePrefs();
             searchInput.value = "";
             dropdown.classList.add("hidden");
           });
@@ -350,6 +494,13 @@
       });
     }
 
+    // Restore saved preferences
+    const savedBlurb = localStorage.getItem("judge_blurb");
+    const savedMovies = localStorage.getItem("judge_movies");
+    if (savedBlurb) document.getElementById("prefsBlurb").value = savedBlurb;
+    if (savedMovies) try { selectedMovies = JSON.parse(savedMovies); renderChips(); } catch (_) {}
+
+    document.getElementById("prefsBlurb").addEventListener("input", savePrefs);
     document.getElementById("leftPick").addEventListener("click", () => vote("left"));
     document.getElementById("rightPick").addEventListener("click", () => vote("right"));
     nextBtn.addEventListener("click", loadRound);

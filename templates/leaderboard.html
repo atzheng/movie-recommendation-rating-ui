@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaderboard</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #0f766e;
+      --gold: #f59e0b;
+      --silver: #9ca3af;
+      --bronze: #b45309;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef6ff 0%, #f5f7fb 42%, #f9fafb 100%);
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+      padding: 1.5rem 1.2rem;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.3rem;
+    }
+    h1 { margin: 0; font-size: 1.5rem; }
+    .meta { font-size: 0.82rem; color: var(--muted); margin-bottom: 1.4rem; }
+    .meta strong { color: var(--ink); }
+
+    .refresh-btn {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 0.4rem 0.8rem;
+      font: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .refresh-btn:hover { background: #f3f4f6; }
+    .refresh-btn.spinning { opacity: 0.6; cursor: default; }
+
+    /* Ranking cards */
+    .ranking { display: grid; gap: 0.6rem; }
+
+    .rank-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.9rem 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      transition: transform 0.25s ease, box-shadow 0.25s ease;
+    }
+    .rank-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+    }
+    .rank-card.rank-1 { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+    .rank-card.rank-2 { border-color: var(--silver); }
+    .rank-card.rank-3 { border-color: var(--bronze); }
+
+    .rank-pos {
+      font-size: 1.4rem;
+      font-weight: 800;
+      width: 2.2rem;
+      text-align: center;
+      flex-shrink: 0;
+      color: var(--muted);
+    }
+    .rank-card.rank-1 .rank-pos { color: var(--gold); }
+    .rank-card.rank-2 .rank-pos { color: var(--silver); }
+    .rank-card.rank-3 .rank-pos { color: var(--bronze); }
+
+    .rank-medal { font-size: 1.5rem; width: 2rem; text-align: center; flex-shrink: 0; }
+
+    .rank-info { flex: 1; min-width: 0; }
+    .rank-name { font-weight: 700; font-size: 1.05rem; }
+    .rank-stats { font-size: 0.82rem; color: var(--muted); margin-top: 0.15rem; }
+
+    .rank-score {
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .rank-score .score-val {
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .rank-score .score-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    /* Win-rate bar */
+    .bar-wrap {
+      width: 90px;
+      flex-shrink: 0;
+    }
+    .bar-bg {
+      height: 6px;
+      background: #e5e7eb;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .bar-pct { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; text-align: right; }
+
+    .empty { text-align: center; color: var(--muted); padding: 3rem 0; }
+
+    .method-note {
+      margin-top: 1.2rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .rank-card { animation: fadeSlideIn 0.3s ease both; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>🏆 Leaderboard</h1>
+      <button class="refresh-btn" id="refreshBtn">Refresh</button>
+    </div>
+    <p class="meta" id="meta">Loading…</p>
+    <div class="ranking" id="ranking"></div>
+    <div class="method-note" id="methodNote"></div>
+  </div>
+
+  <script>
+    const medals = ["🥇", "🥈", "🥉"];
+    let refreshTimer = null;
+
+    async function load() {
+      const btn = document.getElementById("refreshBtn");
+      btn.classList.add("spinning");
+      btn.textContent = "Loading…";
+
+      try {
+        const res = await fetch("/api/leaderboard");
+        const data = await res.json();
+        render(data);
+      } catch (e) {
+        document.getElementById("meta").textContent = "Failed to load. Retrying…";
+      } finally {
+        btn.classList.remove("spinning");
+        btn.textContent = "Refresh";
+        scheduleRefresh();
+      }
+    }
+
+    function render(data) {
+      const metaEl = document.getElementById("meta");
+      const rankingEl = document.getElementById("ranking");
+      const methodEl = document.getElementById("methodNote");
+
+      const now = new Date().toLocaleTimeString();
+      metaEl.innerHTML = `<strong>${data.total_votes}</strong> votes recorded &mdash; updated ${now}`;
+      methodEl.textContent = data.method ? `Ranking method: ${data.method}` : "";
+
+      rankingEl.innerHTML = "";
+
+      if (!data.ranking.length) {
+        rankingEl.innerHTML = '<div class="empty">No teams registered yet.</div>';
+        return;
+      }
+
+      if (data.total_votes === 0) {
+        rankingEl.innerHTML = '<div class="empty">No votes yet — rankings will appear once judging begins.</div>';
+        return;
+      }
+
+      const useScore = data.ranking[0].score !== null;
+      const maxWinRate = Math.max(...data.ranking.map(t => t.win_rate || 0));
+
+      data.ranking.forEach((team, i) => {
+        const card = document.createElement("div");
+        const rankClass = i < 3 ? ` rank-${i + 1}` : "";
+        card.className = `rank-card${rankClass}`;
+        card.style.animationDelay = `${i * 0.05}s`;
+
+        const winRate = team.win_rate !== null ? (team.win_rate * 100).toFixed(1) : "—";
+        const barPct = team.win_rate !== null ? (team.win_rate / Math.max(maxWinRate, 0.001) * 100).toFixed(1) : 0;
+        const scoreDisplay = useScore
+          ? `<div class="score-val">${team.score.toFixed(2)}</div><div class="score-label">BT score</div>`
+          : `<div class="score-val">${winRate}%</div><div class="score-label">win rate</div>`;
+
+        card.innerHTML = `
+          <div class="rank-pos">${i + 1}</div>
+          <div class="rank-medal">${medals[i] || ""}</div>
+          <div class="rank-info">
+            <div class="rank-name">${esc(team.team_name)}</div>
+            <div class="rank-stats">${team.wins}W &ndash; ${team.losses}L &nbsp;&middot;&nbsp; ${team.total} comparisons</div>
+          </div>
+          <div class="bar-wrap">
+            <div class="bar-bg"><div class="bar-fill" style="width:${barPct}%"></div></div>
+            <div class="bar-pct">${winRate}% wins</div>
+          </div>
+          <div class="rank-score">${scoreDisplay}</div>
+        `;
+        rankingEl.appendChild(card);
+      });
+    }
+
+    function scheduleRefresh() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(load, 30000);
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", () => {
+      clearTimeout(refreshTimer);
+      load();
+    });
+
+    load();
+  </script>
+</body>
+</html>

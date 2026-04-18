@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #0f766e;
+      --accent-2: #0b5f57;
+      --danger: #dc2626;
+      --danger-2: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef6ff 0%, #f5f7fb 42%, #f9fafb 100%);
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+      padding: 1.2rem;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 780px; margin: 0 auto; }
+    h1 { margin: 0 0 1.4rem; font-size: 1.35rem; }
+    h2 { margin: 0 0 0.8rem; font-size: 1rem; font-weight: 700; }
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1.4rem;
+    }
+    .field { display: grid; gap: 0.3rem; margin-bottom: 0.65rem; }
+    .field label { font-size: 0.85rem; font-weight: 600; }
+    .field input, .field input[type=file] {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 0.48rem 0.6rem;
+      font: inherit;
+      width: 100%;
+    }
+    .row { display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; }
+    .btn { border: none; border-radius: 8px; padding: 0.52rem 1rem; font: inherit; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-2); }
+    .btn-secondary { background: #f3f4f6; color: var(--ink); border: 1px solid var(--line); }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .btn-danger { background: var(--danger); color: #fff; font-size: 0.82rem; padding: 0.3rem 0.65rem; }
+    .btn-danger:hover { background: var(--danger-2); }
+    .btn-sm { font-size: 0.82rem; padding: 0.3rem 0.65rem; }
+
+    /* Team list */
+    .team-list { display: grid; gap: 0.7rem; }
+    .team-card {
+      background: #f9fafb;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.7rem 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+    }
+    .team-card.disabled { opacity: 0.55; }
+    .team-info { flex: 1; min-width: 0; }
+    .team-name { font-weight: 700; font-size: 0.95rem; }
+    .team-url { font-size: 0.8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute; inset: 0;
+      background: #d1d5db; border-radius: 22px; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle input:checked + .toggle-track { background: var(--accent); }
+    .toggle-track::after {
+      content: ""; position: absolute;
+      left: 3px; top: 3px; width: 16px; height: 16px;
+      background: #fff; border-radius: 50%; transition: transform 0.2s;
+    }
+    .toggle input:checked + .toggle-track::after { transform: translateX(18px); }
+
+    /* Student table */
+    .student-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .student-table th { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 2px solid var(--line); font-weight: 600; }
+    .student-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--line); }
+    .student-table tr:last-child td { border-bottom: none; }
+    .student-count { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.6rem; }
+    .table-wrap { max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+
+    .flash { margin-bottom: 1rem; border-radius: 9px; padding: 0.65rem 0.9rem; font-size: 0.9rem; display: none; }
+    .flash.ok  { background: #f0fdfa; border: 1px solid #99f6e4; color: #0f766e; display: block; }
+    .flash.err { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; display: block; }
+
+    .empty { color: var(--muted); font-size: 0.9rem; text-align: center; padding: 1.5rem 0; }
+
+    /* Login */
+    .login-wrap {
+      max-width: 360px; margin: 6rem auto 0;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+      padding: 2rem;
+    }
+    .login-wrap h1 { text-align: center; margin-bottom: 1.4rem; }
+    .login-wrap .field input { font-size: 1rem; padding: 0.6rem 0.7rem; }
+    .login-wrap .btn-primary { width: 100%; padding: 0.7rem; font-size: 1rem; margin-top: 0.3rem; }
+    .login-error { color: #991b1b; font-size: 0.88rem; margin-bottom: 0.8rem; text-align: center; }
+  </style>
+</head>
+<body>
+
+{% if not authenticated %}
+<!-- ── Login ── -->
+<div class="login-wrap">
+  <h1>Admin Login</h1>
+  {% if error %}<p class="login-error">{{ error }}</p>{% endif %}
+  <form method="post" action="/api/admin/login">
+    <div class="field">
+      <label for="pw">Password</label>
+      <input id="pw" name="password" type="password" autofocus required />
+    </div>
+    <button type="submit" class="btn btn-primary">Sign in</button>
+  </form>
+</div>
+
+{% else %}
+<!-- ── Admin UI ── -->
+<div class="wrap">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.4rem;">
+    <h1 style="margin:0">Admin</h1>
+    <form method="post" action="/api/admin/logout" style="margin:0">
+      <button class="btn btn-secondary btn-sm">Sign out</button>
+    </form>
+  </div>
+
+  <div id="flash" class="flash"></div>
+
+  <!-- Teams section -->
+  <div class="section">
+    <h2>Add a team</h2>
+    <div class="field">
+      <label for="newName">Team name</label>
+      <input id="newName" type="text" placeholder="Team Rocket" />
+    </div>
+    <div class="field">
+      <label for="newUrl">API base URL</label>
+      <input id="newUrl" type="url" placeholder="https://team-rocket.example.com" />
+    </div>
+    <div class="row">
+      <button class="btn btn-primary" id="addBtn">Add team</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Registered teams</h2>
+    <div class="team-list" id="teamList">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Students section -->
+  <div class="section">
+    <h2>Upload students (CSV)</h2>
+    <p style="font-size:0.88rem;color:var(--muted);margin:0 0 0.8rem">
+      Required column: <code>student_id</code> (or <code>id</code>).
+      Optional: <code>name</code>, <code>team_id</code> (or <code>team</code>).
+    </p>
+    <div class="field">
+      <label for="csvFile">CSV file</label>
+      <input id="csvFile" type="file" accept=".csv,text/csv" />
+    </div>
+    <div class="row">
+      <button class="btn btn-primary" id="uploadBtn">Upload</button>
+      <button class="btn btn-danger" id="clearStudentsBtn">Clear all students</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Enrolled students</h2>
+    <p id="studentCount" class="student-count">Loading…</p>
+    <div class="table-wrap" id="studentTableWrap">
+      <table class="student-table">
+        <thead><tr><th>Student ID</th><th>Name</th><th>Team</th></tr></thead>
+        <tbody id="studentBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  const flashEl = document.getElementById("flash");
+
+  function flash(msg, type) {
+    flashEl.textContent = msg;
+    flashEl.className = `flash ${type}`;
+    setTimeout(() => { flashEl.className = "flash"; }, 4000);
+  }
+
+  // ── Teams ──
+
+  async function loadTeams() {
+    const res = await fetch("/api/teams");
+    if (!res.ok) { document.getElementById("teamList").innerHTML = '<div class="empty">Error loading teams.</div>'; return; }
+    const teams = await res.json();
+    const list = document.getElementById("teamList");
+    if (!teams.length) { list.innerHTML = '<div class="empty">No teams yet.</div>'; return; }
+    list.innerHTML = "";
+    teams.forEach(t => list.appendChild(makeTeamCard(t)));
+  }
+
+  function makeTeamCard(t) {
+    const card = document.createElement("div");
+    card.className = `team-card${t.enabled ? "" : " disabled"}`;
+    card.dataset.id = t.id;
+    card.innerHTML = `
+      <label class="toggle" title="${t.enabled ? "Disable" : "Enable"} team">
+        <input type="checkbox" ${t.enabled ? "checked" : ""} />
+        <span class="toggle-track"></span>
+      </label>
+      <div class="team-info">
+        <div class="team-name">${esc(t.team_name)}</div>
+        <div class="team-url">${esc(t.api_url)}</div>
+      </div>
+      <button class="btn btn-danger">Delete</button>
+    `;
+    card.querySelector("input[type=checkbox]").addEventListener("change", async e => {
+      const enabled = e.target.checked;
+      const res = await fetch(`/api/teams/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ team_name: t.team_name, api_url: t.api_url, enabled }),
+      });
+      if (res.ok) {
+        t.enabled = enabled;
+        card.classList.toggle("disabled", !enabled);
+        flash(`${t.team_name} ${enabled ? "enabled" : "disabled"}.`, "ok");
+      } else {
+        e.target.checked = !enabled;
+        flash("Could not update team.", "err");
+      }
+    });
+    card.querySelector(".btn-danger").addEventListener("click", async () => {
+      if (!confirm(`Delete "${t.team_name}"?`)) return;
+      const res = await fetch(`/api/teams/${t.id}`, { method: "DELETE" });
+      if (res.ok) {
+        card.remove();
+        const list = document.getElementById("teamList");
+        if (!list.children.length) list.innerHTML = '<div class="empty">No teams yet.</div>';
+        flash(`${t.team_name} deleted.`, "ok");
+      } else {
+        flash("Could not delete team.", "err");
+      }
+    });
+    return card;
+  }
+
+  document.getElementById("addBtn").addEventListener("click", async () => {
+    const name = document.getElementById("newName").value.trim();
+    const url  = document.getElementById("newUrl").value.trim();
+    if (!name || !url) { flash("Name and URL are required.", "err"); return; }
+    const res = await fetch("/api/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ team_name: name, api_url: url, enabled: true }),
+    });
+    if (res.ok) {
+      const t = await res.json();
+      const list = document.getElementById("teamList");
+      const empty = list.querySelector(".empty");
+      if (empty) empty.remove();
+      list.appendChild(makeTeamCard(t));
+      document.getElementById("newName").value = "";
+      document.getElementById("newUrl").value = "";
+      flash(`${t.team_name} added.`, "ok");
+    } else {
+      const data = await res.json().catch(() => ({}));
+      flash(data.detail || "Could not add team.", "err");
+    }
+  });
+
+  // ── Students ──
+
+  async function loadStudents() {
+    const res = await fetch("/api/students");
+    if (!res.ok) { document.getElementById("studentCount").textContent = "Error loading students."; return; }
+    const students = await res.json();
+    document.getElementById("studentCount").textContent = `${students.length} student${students.length !== 1 ? "s" : ""} enrolled`;
+    const tbody = document.getElementById("studentBody");
+    tbody.innerHTML = "";
+    if (!students.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:1rem">No students yet.</td></tr>';
+      return;
+    }
+    students.forEach(s => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${esc(s.student_id)}</td><td>${esc(s.name)}</td><td>${esc(s.team_id)}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  document.getElementById("uploadBtn").addEventListener("click", async () => {
+    const file = document.getElementById("csvFile").files[0];
+    if (!file) { flash("Select a CSV file first.", "err"); return; }
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/students/upload", { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      flash(`Uploaded ${data.inserted} student(s).`, "ok");
+      loadStudents();
+    } else {
+      flash(data.detail || "Upload failed.", "err");
+    }
+  });
+
+  document.getElementById("clearStudentsBtn").addEventListener("click", async () => {
+    if (!confirm("Delete all students? This cannot be undone.")) return;
+    const res = await fetch("/api/students", { method: "DELETE" });
+    if (res.ok) { flash("All students cleared.", "ok"); loadStudents(); }
+    else flash("Could not clear students.", "err");
+  });
+
+  function esc(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  loadTeams();
+  loadStudents();
+</script>
+{% endif %}
+</body>
+</html>

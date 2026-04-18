@@ -9,3 +9,4 @@ envs:
   - name: TEAMS_TABLE
   - name: STUDENTS_TABLE
   - name: RESULTS_TABLE
+  - name: ADMIN_PASSWORD

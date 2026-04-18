@@ -177,7 +177,6 @@
     <div class="top">
       <div>
         <h1>Choose your preferred recommendation</h1>
-        <p class="sub">Student codename: <strong>{{ codename }}</strong></p>
       </div>
       <button id="nextBtn" class="next">Load new pair</button>
     </div>
@@ -216,7 +215,6 @@
     <div id="status" class="status">Loading round...</div>
   </div>
   <script>
-    const codename = {{ codename_json | safe }};
     const allMovies = {{ movies_json | safe }};
     let selectedMovies = [];
     let currentRound = null;
@@ -257,7 +255,7 @@
       statusEl.className = "status";
       statusEl.textContent = "Fetching two random team APIs...";
       try {
-        const url = `/api/session/${encodeURIComponent(codename)}/round?preferences=${encodeURIComponent(prefs)}`;
+        const url = `/api/session/round?preferences=${encodeURIComponent(prefs)}`;
         const res = await fetch(url);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
@@ -279,7 +277,7 @@
       statusEl.className = "status";
       statusEl.textContent = "Saving your vote...";
       try {
-        const res = await fetch(`/api/session/${encodeURIComponent(codename)}/vote`, {
+        const res = await fetch(`/api/session/vote`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -352,23 +350,10 @@
       });
     }
 
-    async function initPrefs() {
-      try {
-        const res = await fetch(`/api/session/${encodeURIComponent(codename)}/preferences`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.preferences) {
-            document.getElementById("prefsBlurb").value = data.preferences;
-          }
-        }
-      } catch (_) {}
-    }
-
     document.getElementById("leftPick").addEventListener("click", () => vote("left"));
     document.getElementById("rightPick").addEventListener("click", () => vote("right"));
     nextBtn.addEventListener("click", loadRound);
     setupMoviePicker();
-    initPrefs().then(loadRound);
   </script>
 </body>
 </html>

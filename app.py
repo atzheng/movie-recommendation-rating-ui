@@ -17,7 +17,6 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 TEAMS_TABLE = os.environ.get("TEAMS_TABLE", "teams")
-STUDENTS_TABLE = os.environ.get("STUDENTS_TABLE", "students")
 RESULTS_TABLE = os.environ.get("RESULTS_TABLE", "results")
 
 POSTER_BASE_URL = "https://image.tmdb.org/t/p/w342"
@@ -28,8 +27,6 @@ TMDB_CSV_PATH = os.environ.get(
 
 if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", TEAMS_TABLE):
     raise RuntimeError("Invalid TEAMS_TABLE name")
-if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", STUDENTS_TABLE):
-    raise RuntimeError("Invalid STUDENTS_TABLE name")
 if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", RESULTS_TABLE):
     raise RuntimeError("Invalid RESULTS_TABLE name")
 
@@ -58,27 +55,6 @@ class VoteRequest(BaseModel):
     preferences: str = ""
 
 
-def parse_history(raw_history: Any) -> list[dict[str, Any]]:
-    if isinstance(raw_history, list):
-        return raw_history
-    if isinstance(raw_history, str) and raw_history.strip():
-        try:
-            data = json.loads(raw_history)
-        except json.JSONDecodeError:
-            return []
-        if isinstance(data, list):
-            return data
-    return []
-
-
-def normalize_user_id(student_id: int, user_id: Any) -> int:
-    if isinstance(user_id, int):
-        return user_id
-    if isinstance(user_id, str) and user_id.isdigit():
-        return int(user_id)
-    return student_id
-
-
 def enrich_recommendation(raw: dict[str, Any]) -> dict[str, Any]:
     tmdb_id = int(raw.get("tmdb_id", -1))
     movie = TMDB_LOOKUP.get(tmdb_id, {})
@@ -96,7 +72,7 @@ def enrich_recommendation(raw: dict[str, Any]) -> dict[str, Any]:
 async def call_team_api(
     client: httpx.AsyncClient, api_url: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    resp = await client.post(api_url, json=payload, timeout=8.0)
+    resp = await client.post(f"{api_url}/recommend", json=payload, timeout=8.0)
     if resp.status_code >= 300:
         raise HTTPException(
             status_code=502, detail=f"Team API failed ({api_url}): HTTP {resp.status_code}"
@@ -128,57 +104,40 @@ def health():
     return {"status": "ok", "app": "rating-ui"}
 
 
-@app.get("/judge/{codename}", response_class=HTMLResponse)
-def judge_page(request: Request, codename: str):
+@app.get("/judge", response_class=HTMLResponse)
+def judge_page(request: Request):
     return templates.TemplateResponse(request, "judge.html", {
-        "codename": codename,
-        "codename_json": json.dumps(codename),
         "movies_json": MOVIES_JSON,
     })
 
 
-@app.get("/api/session/{codename}/preferences")
-async def get_preferences(codename: str):
-    pool = app.state.db_pool
-    student_sql = (
-        f"SELECT preferences FROM {STUDENTS_TABLE} WHERE codename = $1 LIMIT 1"
-    )
-    async with pool.acquire() as conn:
-        student = await conn.fetchrow(student_sql, codename)
-        if student is None:
-            raise HTTPException(status_code=404, detail="Unknown student codename")
-    return {"preferences": (student["preferences"] or "").strip()}
+@app.get("/api/session/preferences")
+async def get_preferences():
+    return {"preferences": ""}
 
 
-@app.get("/api/session/{codename}/round")
-async def get_round(codename: str, preferences: str = Query(default="")):
+@app.get("/api/session/round")
+async def get_round(preferences: str = Query(default="")):
+    prefs = preferences.strip()
+    if not prefs:
+        raise HTTPException(status_code=400, detail="Please enter your preferences before loading recommendations")
+
     pool = app.state.db_pool
-    student_sql = (
-        f"SELECT id, codename, preferences, history, user_id "
-        f"FROM {STUDENTS_TABLE} WHERE codename = $1 LIMIT 1"
-    )
     teams_sql = (
         f"SELECT id, team_name, api_url "
         f"FROM {TEAMS_TABLE} WHERE enabled = TRUE ORDER BY random() LIMIT 2"
     )
 
     async with pool.acquire() as conn:
-        student = await conn.fetchrow(student_sql, codename)
-        if student is None:
-            raise HTTPException(status_code=404, detail="Unknown student codename")
-        prefs = preferences.strip() or (student["preferences"] or "").strip()
-        if not prefs:
-            raise HTTPException(status_code=400, detail="Please enter your preferences before loading recommendations")
-
         teams = await conn.fetch(teams_sql)
         if len(teams) < 2:
             raise HTTPException(status_code=400, detail="Need at least 2 enabled teams")
 
     left_team, right_team = teams[0], teams[1]
     req_payload = {
-        "user_id": normalize_user_id(student["id"], student["user_id"]),
+        "user_id": 0,
         "preferences": prefs,
-        "history": parse_history(student["history"]),
+        "history": [],
     }
 
     async with httpx.AsyncClient() as client:
@@ -189,7 +148,6 @@ async def get_round(codename: str, preferences: str = Query(default="")):
 
     return {
         "round_id": os.urandom(10).hex(),
-        "student": {"codename": codename, "record_id": student["id"], "preferences": prefs},
         "preferences": prefs,
         "left": {
             "team": {
@@ -210,8 +168,8 @@ async def get_round(codename: str, preferences: str = Query(default="")):
     }
 
 
-@app.post("/api/session/{codename}/vote")
-async def submit_vote(codename: str, vote: VoteRequest):
+@app.post("/api/session/vote")
+async def submit_vote(vote: VoteRequest):
     if vote.winner_side not in {"left", "right"}:
         raise HTTPException(status_code=400, detail="winner_side must be 'left' or 'right'")
 
@@ -219,9 +177,6 @@ async def submit_vote(codename: str, vote: VoteRequest):
     loser = vote.right if vote.winner_side == "left" else vote.left
 
     pool = app.state.db_pool
-    student_sql = (
-        f"SELECT preferences FROM {STUDENTS_TABLE} WHERE codename = $1 LIMIT 1"
-    )
     insert_sql = (
         f"INSERT INTO {RESULTS_TABLE} ("
         "round_id, student_codename, student_preferences, "
@@ -231,16 +186,11 @@ async def submit_vote(codename: str, vote: VoteRequest):
     )
 
     async with pool.acquire() as conn:
-        student = await conn.fetchrow(student_sql, codename)
-        if student is None:
-            raise HTTPException(status_code=404, detail="Unknown student codename")
-
-        prefs_to_record = vote.preferences.strip() or str(student["preferences"] or "")
         await conn.execute(
             insert_sql,
             vote.round_id,
-            codename,
-            prefs_to_record,
+            "",
+            vote.preferences.strip(),
             winner.get("team", {}).get("name", ""),
             loser.get("team", {}).get("name", ""),
             winner.get("team", {}).get("api_url", ""),

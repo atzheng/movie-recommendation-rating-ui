@@ -120,14 +120,10 @@ async def call_team_api(
 ) -> dict[str, Any]:
     resp = await client.post(f"{api_url}/recommend", json=payload, timeout=8.0)
     if resp.status_code >= 300:
-        raise HTTPException(
-            status_code=502, detail=f"Team API failed ({api_url}): HTTP {resp.status_code}"
-        )
+        raise ValueError(f"Team API failed ({api_url}): HTTP {resp.status_code}")
     body = resp.json()
     if "tmdb_id" not in body or "description" not in body:
-        raise HTTPException(
-            status_code=502, detail=f"Team API returned invalid JSON shape ({api_url})"
-        )
+        raise ValueError(f"Team API returned invalid JSON shape ({api_url})")
     return body
 
 
@@ -190,8 +186,12 @@ async def get_leaderboard():
             f"SELECT team_name FROM {TEAMS_TABLE} ORDER BY id"
         )
         results = await conn.fetch(
-            f"SELECT winner_team, loser_team FROM {RESULTS_TABLE} "
-            f"WHERE winner_team <> '' AND loser_team <> ''"
+            f"SELECT winner_team, loser_team FROM ("
+            f"  SELECT winner_team, loser_team, student_codename,"
+            f"         ROW_NUMBER() OVER (PARTITION BY student_codename ORDER BY created_at DESC) AS rn"
+            f"  FROM {RESULTS_TABLE}"
+            f"  WHERE winner_team <> '' AND loser_team <> ''"
+            f") sub WHERE rn <= 100"
         )
 
     team_names = [r["team_name"] for r in teams]
@@ -407,56 +407,101 @@ async def get_student(student_id: str):
 # Judge session
 # ---------------------------------------------------------------------------
 
+async def _fetch_teams(pool, student_team: str):
+    if student_team:
+        async with pool.acquire() as conn:
+            return await conn.fetch(
+                f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
+                f"WHERE enabled = TRUE AND team_name <> $1 ORDER BY random() LIMIT 2",
+                student_team,
+            )
+    async with pool.acquire() as conn:
+        return await conn.fetch(
+            f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
+            f"WHERE enabled = TRUE ORDER BY random() LIMIT 2"
+        )
+
+
+async def _record_result(pool, round_id, student_id, prefs, winner, loser, winner_rec, loser_rec):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"INSERT INTO {RESULTS_TABLE} ("
+            "round_id, student_codename, student_preferences, "
+            "winner_team, loser_team, winner_api_url, loser_api_url, "
+            "winner_tmdb_id, loser_tmdb_id, winner_description, loser_description"
+            ") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            round_id, student_id, prefs,
+            winner["team_name"], loser["team_name"],
+            winner["api_url"], loser["api_url"],
+            int(winner_rec.get("tmdb_id", -1)),
+            int(loser_rec.get("tmdb_id", -1)),
+            str(winner_rec.get("description", "")),
+            str(loser_rec.get("description", "")),
+        )
+
+
 @app.get("/api/session/round")
-async def get_round(preferences: str = Query(default="")):
+async def get_round(preferences: str = Query(default=""), student_team: str = Query(default="")):
     prefs = preferences.strip()
     if not prefs:
         raise HTTPException(status_code=400, detail="Please enter your preferences before loading recommendations")
 
     pool = app.state.db_pool
-    teams_sql = (
-        f"SELECT id, team_name, api_url "
-        f"FROM {TEAMS_TABLE} WHERE enabled = TRUE ORDER BY random() LIMIT 2"
-    )
+    req_payload = {"user_id": 0, "preferences": prefs, "history": []}
 
-    async with pool.acquire() as conn:
-        teams = await conn.fetch(teams_sql)
+    # Attempt up to twice: once normally, once after recording an auto-win from a partial failure.
+    for attempt in range(2):
+        teams = await _fetch_teams(pool, student_team.strip())
         if len(teams) < 2:
             raise HTTPException(status_code=400, detail="Need at least 2 enabled teams")
 
-    left_team, right_team = teams[0], teams[1]
-    req_payload = {
-        "user_id": 0,
-        "preferences": prefs,
-        "history": [],
-    }
+        left_team, right_team = teams[0], teams[1]
 
-    async with httpx.AsyncClient() as client:
-        left_raw, right_raw = await asyncio.gather(
-            call_team_api(client, left_team["api_url"], req_payload),
-            call_team_api(client, right_team["api_url"], req_payload),
+        async with httpx.AsyncClient() as client:
+            left_raw, right_raw = await asyncio.gather(
+                call_team_api(client, left_team["api_url"], req_payload),
+                call_team_api(client, right_team["api_url"], req_payload),
+                return_exceptions=True,
+            )
+
+        left_err = isinstance(left_raw, Exception)
+        right_err = isinstance(right_raw, Exception)
+
+        if not left_err and not right_err:
+            # Both succeeded — return the round.
+            return {
+                "round_id": os.urandom(10).hex(),
+                "preferences": prefs,
+                "left": {
+                    "team": {"record_id": left_team["id"], "name": left_team["team_name"], "api_url": left_team["api_url"]},
+                    "recommendation": enrich_recommendation(left_raw),
+                },
+                "right": {
+                    "team": {"record_id": right_team["id"], "name": right_team["team_name"], "api_url": right_team["api_url"]},
+                    "recommendation": enrich_recommendation(right_raw),
+                },
+            }
+
+        if left_err and right_err:
+            if attempt == 0:
+                continue  # retry with a fresh pair
+            raise HTTPException(status_code=502, detail="Both team APIs failed")
+
+        # Exactly one errored — record auto-win for the successful team.
+        winner_team = right_team if left_err else left_team
+        loser_team  = left_team  if left_err else right_team
+        winner_raw  = right_raw  if left_err else left_raw
+        winner_rec  = enrich_recommendation(winner_raw)
+        await _record_result(
+            pool, os.urandom(10).hex(), "", prefs,
+            winner_team, loser_team,
+            winner_rec, {"tmdb_id": -1, "description": ""},
         )
+        if attempt == 0:
+            continue  # fetch a fresh pair to show the user
+        raise HTTPException(status_code=502, detail="One team API kept failing after retry")
 
-    return {
-        "round_id": os.urandom(10).hex(),
-        "preferences": prefs,
-        "left": {
-            "team": {
-                "record_id": left_team["id"],
-                "name": left_team["team_name"],
-                "api_url": left_team["api_url"],
-            },
-            "recommendation": enrich_recommendation(left_raw),
-        },
-        "right": {
-            "team": {
-                "record_id": right_team["id"],
-                "name": right_team["team_name"],
-                "api_url": right_team["api_url"],
-            },
-            "recommendation": enrich_recommendation(right_raw),
-        },
-    }
+    raise HTTPException(status_code=502, detail="Could not load a valid round")
 
 
 @app.post("/api/session/vote")

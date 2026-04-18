@@ -30,14 +30,16 @@
     h1 { margin: 0; font-size: 1.35rem; }
     .sub { margin: 0.3rem 0 0; color: var(--muted); }
     .next {
-      border: 1px solid var(--line);
+      border: none;
       border-radius: 10px;
-      background: #fff;
+      background: var(--accent);
+      color: #fff;
       padding: 0.6rem 0.95rem;
       cursor: pointer;
       font-weight: 600;
       margin-top: 0.8rem;
     }
+    .next:hover { background: var(--accent-2); }
     .grid {
       display: grid;
       grid-template-columns: 1fr;
@@ -104,11 +106,9 @@
       border-radius: 10px;
       background: #fff;
       padding: 0.8rem 0.95rem;
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 0.8rem;
-    }
-    @media (min-width: 900px) {
-      .prefs-box { grid-template-columns: 1fr 1fr; }
     }
     .prefs-section label {
       display: block;
@@ -380,7 +380,8 @@
       statusEl.className = "status";
       statusEl.textContent = "Fetching two random team APIs...";
       try {
-        const url = `/api/session/round?preferences=${encodeURIComponent(prefs)}`;
+        const teamParam = currentStudent?.team_id ? `&student_team=${encodeURIComponent(currentStudent.team_id)}` : "";
+        const url = `/api/session/round?preferences=${encodeURIComponent(prefs)}${teamParam}`;
         const res = await fetch(url);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);

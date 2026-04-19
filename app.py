@@ -135,7 +135,9 @@ async def call_team_api(
 async def startup() -> None:
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL must be set")
-    app.state.db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+    app.state.db_pool = await asyncpg.create_pool(
+        DATABASE_URL, min_size=1, max_size=10, statement_cache_size=0
+    )
     async with app.state.db_pool.acquire() as conn:
         await conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {STUDENTS_TABLE} (

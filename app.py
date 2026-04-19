@@ -150,15 +150,21 @@ async def get_conn():
 async def startup() -> None:
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL must be set")
-    async with get_conn() as conn:
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS {STUDENTS_TABLE} (
-                id bigserial PRIMARY KEY,
-                student_id text UNIQUE NOT NULL,
-                name text NOT NULL DEFAULT '',
-                team_id text NOT NULL DEFAULT ''
-            )
-        """)
+    # Best-effort: create students table. Non-fatal so the app always starts
+    # even if the DB is momentarily unavailable at boot time.
+    try:
+        async with get_conn() as conn:
+            await conn.execute(f"""
+                CREATE TABLE IF NOT EXISTS {STUDENTS_TABLE} (
+                    id bigserial PRIMARY KEY,
+                    student_id text UNIQUE NOT NULL,
+                    name text NOT NULL DEFAULT '',
+                    team_id text NOT NULL DEFAULT ''
+                )
+            """)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Startup DB migration skipped: %s", exc)
 
 
 # ---------------------------------------------------------------------------

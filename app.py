@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import hashlib
 import hmac as hmac_lib
 import io
@@ -128,17 +129,28 @@ async def call_team_api(
 
 
 # ---------------------------------------------------------------------------
-# Startup / shutdown
+# Database helpers
+# ---------------------------------------------------------------------------
+
+@contextlib.asynccontextmanager
+async def get_conn():
+    """Open a direct connection to Postgres (PgBouncer is the pool)."""
+    conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Startup
 # ---------------------------------------------------------------------------
 
 @app.on_event("startup")
 async def startup() -> None:
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL must be set")
-    app.state.db_pool = await asyncpg.create_pool(
-        DATABASE_URL, min_size=1, max_size=10, statement_cache_size=0
-    )
-    async with app.state.db_pool.acquire() as conn:
+    async with get_conn() as conn:
         await conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {STUDENTS_TABLE} (
                 id bigserial PRIMARY KEY,
@@ -147,13 +159,6 @@ async def startup() -> None:
                 team_id text NOT NULL DEFAULT ''
             )
         """)
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    pool = getattr(app.state, "db_pool", None)
-    if pool is not None:
-        await pool.close()
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +187,7 @@ def leaderboard_page(request: Request):
 
 @app.get("/api/leaderboard")
 async def get_leaderboard():
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         teams = await conn.fetch(
             f"SELECT team_name FROM {TEAMS_TABLE} ORDER BY id"
         )
@@ -284,8 +288,7 @@ async def admin_logout():
 @app.get("/api/teams")
 async def list_teams(request: Request):
     _require_admin(request)
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         rows = await conn.fetch(
             f"SELECT id, team_name, api_url, enabled FROM {TEAMS_TABLE} ORDER BY id"
         )
@@ -295,8 +298,7 @@ async def list_teams(request: Request):
 @app.post("/api/teams", status_code=201)
 async def create_team(request: Request, team: TeamRequest):
     _require_admin(request)
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         row = await conn.fetchrow(
             f"INSERT INTO {TEAMS_TABLE} (team_name, api_url, enabled) VALUES ($1, $2, $3) RETURNING id, team_name, api_url, enabled",
             team.team_name.strip(), team.api_url.strip(), team.enabled,
@@ -307,8 +309,7 @@ async def create_team(request: Request, team: TeamRequest):
 @app.patch("/api/teams/{team_id}")
 async def update_team(team_id: int, request: Request, team: TeamRequest):
     _require_admin(request)
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         row = await conn.fetchrow(
             f"UPDATE {TEAMS_TABLE} SET team_name=$1, api_url=$2, enabled=$3 WHERE id=$4 RETURNING id, team_name, api_url, enabled",
             team.team_name.strip(), team.api_url.strip(), team.enabled, team_id,
@@ -321,8 +322,7 @@ async def update_team(team_id: int, request: Request, team: TeamRequest):
 @app.delete("/api/teams/{team_id}", status_code=204)
 async def delete_team(team_id: int, request: Request):
     _require_admin(request)
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         result = await conn.execute(f"DELETE FROM {TEAMS_TABLE} WHERE id=$1", team_id)
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Team not found")
@@ -335,8 +335,7 @@ async def delete_team(team_id: int, request: Request):
 @app.get("/api/students")
 async def list_students(request: Request):
     _require_admin(request)
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         rows = await conn.fetch(
             f"SELECT id, student_id, name, team_id FROM {STUDENTS_TABLE} ORDER BY team_id, name"
         )
@@ -375,8 +374,7 @@ async def upload_students(request: Request, file: UploadFile):
         team_id = str(row[col_map["team_id"]]).strip() if "team_id" in col_map else ""
         rows.append((sid, name, team_id))
 
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         await conn.executemany(
             f"INSERT INTO {STUDENTS_TABLE} (student_id, name, team_id) VALUES ($1, $2, $3) "
             f"ON CONFLICT (student_id) DO UPDATE SET name=EXCLUDED.name, team_id=EXCLUDED.team_id",
@@ -388,15 +386,13 @@ async def upload_students(request: Request, file: UploadFile):
 @app.delete("/api/students", status_code=204)
 async def clear_students(request: Request):
     _require_admin(request)
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         await conn.execute(f"DELETE FROM {STUDENTS_TABLE}")
 
 
 @app.get("/api/students/{student_id}")
 async def get_student(student_id: str):
-    pool = app.state.db_pool
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         row = await conn.fetchrow(
             f"SELECT student_id, name, team_id FROM {STUDENTS_TABLE} WHERE student_id=$1", student_id
         )
@@ -409,23 +405,22 @@ async def get_student(student_id: str):
 # Judge session
 # ---------------------------------------------------------------------------
 
-async def _fetch_teams(pool, student_team: str):
-    if student_team:
-        async with pool.acquire() as conn:
+async def _fetch_teams(student_team: str):
+    async with get_conn() as conn:
+        if student_team:
             return await conn.fetch(
                 f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
                 f"WHERE enabled = TRUE AND team_name <> $1 ORDER BY random() LIMIT 2",
                 student_team,
             )
-    async with pool.acquire() as conn:
         return await conn.fetch(
             f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
             f"WHERE enabled = TRUE ORDER BY random() LIMIT 2"
         )
 
 
-async def _record_result(pool, round_id, student_id, prefs, winner, loser, winner_rec, loser_rec):
-    async with pool.acquire() as conn:
+async def _record_result(round_id, student_id, prefs, winner, loser, winner_rec, loser_rec):
+    async with get_conn() as conn:
         await conn.execute(
             f"INSERT INTO {RESULTS_TABLE} ("
             "round_id, student_codename, student_preferences, "
@@ -448,12 +443,11 @@ async def get_round(preferences: str = Query(default=""), student_team: str = Qu
     if not prefs:
         raise HTTPException(status_code=400, detail="Please enter your preferences before loading recommendations")
 
-    pool = app.state.db_pool
     req_payload = {"user_id": 0, "preferences": prefs, "history": []}
 
     # Attempt up to twice: once normally, once after recording an auto-win from a partial failure.
     for attempt in range(2):
-        teams = await _fetch_teams(pool, student_team.strip())
+        teams = await _fetch_teams(student_team.strip())
         if len(teams) < 2:
             raise HTTPException(status_code=400, detail="Need at least 2 enabled teams")
 
@@ -495,7 +489,7 @@ async def get_round(preferences: str = Query(default=""), student_team: str = Qu
         winner_raw  = right_raw  if left_err else left_raw
         winner_rec  = enrich_recommendation(winner_raw)
         await _record_result(
-            pool, os.urandom(10).hex(), "", prefs,
+            os.urandom(10).hex(), "", prefs,
             winner_team, loser_team,
             winner_rec, {"tmdb_id": -1, "description": ""},
         )
@@ -514,18 +508,13 @@ async def submit_vote(vote: VoteRequest):
     winner = vote.left if vote.winner_side == "left" else vote.right
     loser = vote.right if vote.winner_side == "left" else vote.left
 
-    pool = app.state.db_pool
-    insert_sql = (
-        f"INSERT INTO {RESULTS_TABLE} ("
-        "round_id, student_codename, student_preferences, "
-        "winner_team, loser_team, winner_api_url, loser_api_url, "
-        "winner_tmdb_id, loser_tmdb_id, winner_description, loser_description"
-        ") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)"
-    )
-
-    async with pool.acquire() as conn:
+    async with get_conn() as conn:
         await conn.execute(
-            insert_sql,
+            f"INSERT INTO {RESULTS_TABLE} ("
+            "round_id, student_codename, student_preferences, "
+            "winner_team, loser_team, winner_api_url, loser_api_url, "
+            "winner_tmdb_id, loser_tmdb_id, winner_description, loser_description"
+            ") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
             vote.round_id,
             vote.student_id.strip(),
             vote.preferences.strip(),

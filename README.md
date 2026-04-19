@@ -1,98 +1,119 @@
 # Rating UI (Standalone App, Postgres-backed)
 
-This app is separate from the recommender starter API.
+Side-by-side movie recommendation judging UI. Students enter their student ID, describe their preferences, and repeatedly pick the better of two recommendations. Results feed a Bradley-Terry leaderboard.
 
-It provides a side-by-side judging UI where each student (via codename URL) sees two random team recommendations and picks a winner.
+## Pages
 
-## Routes
+- `GET /judge` — student judging UI (shared link, no codename)
+- `GET /leaderboard` — public leaderboard (Bradley-Terry ranking)
+- `GET /admin` — admin UI (password-protected)
 
-- `GET /judge/{codename}`: main rating page
-- `GET /api/session/{codename}/round`: fetch two random distinct team recommendations
-- `POST /api/session/{codename}/vote`: persist selected winner into Postgres
-- `GET /`: health check
+## API routes
+
+- `GET /api/session/round?preferences=...&student_team=...` — fetch two random team recommendations
+- `POST /api/session/vote` — persist selected winner
+- `GET /api/leaderboard` — leaderboard JSON
+- `GET /api/teams` — list teams (admin)
+- `POST /api/teams` — add team (admin)
+- `PATCH /api/teams/{id}` — update/enable/disable team (admin)
+- `DELETE /api/teams/{id}` — delete team (admin)
+- `GET /api/students` — list students (admin)
+- `POST /api/students/upload` — upload students CSV (admin)
+- `DELETE /api/students` — clear all students (admin)
+- `GET /api/students/{student_id}` — look up one student (used by judge page)
 
 ## Environment variables
 
 Required:
 
-- `DATABASE_URL` (Leapcell Postgres connection string)
+- `DATABASE_URL` — Postgres connection string (e.g. `postgresql://user:pass@host:5432/db?sslmode=require`)
+- `ADMIN_PASSWORD` — password for the `/admin` page
 
 Optional:
 
 - `TEAMS_TABLE` (default: `teams`)
 - `STUDENTS_TABLE` (default: `students`)
 - `RESULTS_TABLE` (default: `results`)
-- `TMDB_CSV_PATH` (default points to `./tmdb_top1000_movies.csv`)
+- `TMDB_CSV_PATH` (default: `./tmdb_top1000_movies.csv`)
 
-## Expected Postgres schema
+## Postgres schema
+
+The `students` table is auto-created on startup. The other two must exist before the app starts.
 
 ```sql
 CREATE TABLE IF NOT EXISTS teams (
-  id BIGSERIAL PRIMARY KEY,
-  team_name TEXT NOT NULL,
-  api_url TEXT NOT NULL,
-  enabled BOOLEAN NOT NULL DEFAULT TRUE
+  id        BIGSERIAL PRIMARY KEY,
+  team_name TEXT    NOT NULL,
+  api_url   TEXT    NOT NULL,
+  enabled   BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS students (
-  id BIGSERIAL PRIMARY KEY,
-  codename TEXT NOT NULL UNIQUE,
-  preferences TEXT,
-  history JSONB NOT NULL DEFAULT '[]'::jsonb,
-  user_id BIGINT
+  id         BIGSERIAL PRIMARY KEY,
+  student_id TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL DEFAULT '',
+  team_id    TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS results (
-  id BIGSERIAL PRIMARY KEY,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  round_id TEXT NOT NULL,
-  student_codename TEXT NOT NULL,
+  id                  BIGSERIAL PRIMARY KEY,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  round_id            TEXT NOT NULL,
+  student_codename    TEXT NOT NULL,
   student_preferences TEXT NOT NULL,
-  winner_team TEXT NOT NULL,
-  loser_team TEXT NOT NULL,
-  winner_api_url TEXT NOT NULL,
-  loser_api_url TEXT NOT NULL,
-  winner_tmdb_id BIGINT NOT NULL,
-  loser_tmdb_id BIGINT NOT NULL,
-  winner_description TEXT NOT NULL,
-  loser_description TEXT NOT NULL
+  winner_team         TEXT NOT NULL,
+  loser_team          TEXT NOT NULL,
+  winner_api_url      TEXT NOT NULL,
+  loser_api_url       TEXT NOT NULL,
+  winner_tmdb_id      BIGINT NOT NULL,
+  loser_tmdb_id       BIGINT NOT NULL,
+  winner_description  TEXT NOT NULL,
+  loser_description   TEXT NOT NULL
 );
 ```
 
 ## Sample seed data
 
 ```sql
-INSERT INTO students (codename, history, user_id)
-VALUES
-  ('blue-otter', '[]'::jsonb, 1001),
-  ('quiet-panda', '[]'::jsonb, 1002);
-
 INSERT INTO teams (team_name, api_url, enabled)
 VALUES
-  ('Team Alpha', 'https://alpha.example.com/recommend', TRUE),
-  ('Team Beta', 'https://beta.example.com/recommend', TRUE);
+  ('Team Alpha', 'https://alpha.example.com', TRUE),
+  ('Team Beta',  'https://beta.example.com',  TRUE);
+
+INSERT INTO students (student_id, name, team_id)
+VALUES
+  ('s001', 'Alice', 'Team Alpha'),
+  ('s002', 'Bob',   'Team Beta');
 ```
+
+Or upload a CSV via the admin UI with columns: `student_id`, `name` (optional), `team_id` (optional).
+
+## Team API contract
+
+Each team must expose:
+
+```
+POST /recommend
+Content-Type: application/json
+
+{ "user_id": 0, "preferences": "...", "history": [] }
+```
+
+Response must include `tmdb_id` (integer) and `description` (string).
 
 ## Local run
 
 ```bash
-cd rating-ui
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+export ADMIN_PASSWORD=secret
 uvicorn app:app --reload
 ```
 
-Then open a student link:
-
-`http://localhost:8000/judge/blue-otter`
+Then open `http://localhost:8000/judge`.
 
 ## Leapcell deploy
 
-This folder includes `leapcell.yaml`:
-
-- build: `pip install -r requirements.txt`
-- run: `uvicorn app:app --host 0.0.0.0 --port 8080`
-
-Set `DATABASE_URL` in Leapcell service env vars.
+Set `DATABASE_URL` and `ADMIN_PASSWORD` in Leapcell's environment variables UI. The other variables have sensible defaults.

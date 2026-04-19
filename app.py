@@ -4,6 +4,7 @@ import hashlib
 import hmac as hmac_lib
 import io
 import json
+import logging
 import os
 import re
 from collections import defaultdict
@@ -146,12 +147,8 @@ async def get_conn():
 # Startup
 # ---------------------------------------------------------------------------
 
-@app.on_event("startup")
-async def startup() -> None:
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL must be set")
-    # Best-effort: create students table. Non-fatal so the app always starts
-    # even if the DB is momentarily unavailable at boot time.
+async def _init_db() -> None:
+    """Create the students table in the background so startup doesn't block."""
     try:
         async with get_conn() as conn:
             await conn.execute(f"""
@@ -163,8 +160,15 @@ async def startup() -> None:
                 )
             """)
     except Exception as exc:
-        import logging
         logging.getLogger(__name__).warning("Startup DB migration skipped: %s", exc)
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL must be set")
+    # Fire-and-forget: don't block uvicorn from binding to port 8080
+    asyncio.create_task(_init_db())
 
 
 # ---------------------------------------------------------------------------

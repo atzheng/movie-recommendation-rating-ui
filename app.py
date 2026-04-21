@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import hashlib
 import hmac as hmac_lib
 import io
@@ -9,12 +8,14 @@ import os
 import re
 from collections import defaultdict
 from typing import Any
+import contextlib
 
-import asyncpg
 import choix
 import httpx
 import numpy as np
 import pandas as pd
+import psycopg
+from psycopg.rows import dict_row
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -135,12 +136,14 @@ async def call_team_api(
 
 @contextlib.asynccontextmanager
 async def get_conn():
-    """Open a direct connection to Postgres (PgBouncer is the pool)."""
-    conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)
-    try:
+    """Open a direct psycopg connection (PgBouncer is the pool)."""
+    async with await psycopg.AsyncConnection.connect(
+        DATABASE_URL,
+        row_factory=dict_row,
+        autocommit=True,
+        connect_timeout=10,
+    ) as conn:
         yield conn
-    finally:
-        await conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +154,15 @@ async def _init_db() -> None:
     """Create the students table in the background so startup doesn't block."""
     try:
         async with get_conn() as conn:
-            await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS {STUDENTS_TABLE} (
-                    id bigserial PRIMARY KEY,
-                    student_id text UNIQUE NOT NULL,
-                    name text NOT NULL DEFAULT '',
-                    team_id text NOT NULL DEFAULT ''
-                )
-            """)
+            async with conn.cursor() as cur:
+                await cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {STUDENTS_TABLE} (
+                        id bigserial PRIMARY KEY,
+                        student_id text UNIQUE NOT NULL,
+                        name text NOT NULL DEFAULT '',
+                        team_id text NOT NULL DEFAULT ''
+                    )
+                """)
     except Exception as exc:
         logging.getLogger(__name__).warning("Startup DB migration skipped: %s", exc)
 
@@ -198,17 +202,18 @@ def leaderboard_page(request: Request):
 @app.get("/api/leaderboard")
 async def get_leaderboard():
     async with get_conn() as conn:
-        teams = await conn.fetch(
-            f"SELECT team_name FROM {TEAMS_TABLE} ORDER BY id"
-        )
-        results = await conn.fetch(
-            f"SELECT winner_team, loser_team FROM ("
-            f"  SELECT winner_team, loser_team, student_codename,"
-            f"         ROW_NUMBER() OVER (PARTITION BY student_codename ORDER BY created_at DESC) AS rn"
-            f"  FROM {RESULTS_TABLE}"
-            f"  WHERE winner_team <> '' AND loser_team <> ''"
-            f") sub WHERE rn <= 100"
-        )
+        async with conn.cursor() as cur:
+            await cur.execute(f"SELECT team_name FROM {TEAMS_TABLE} ORDER BY id")
+            teams = await cur.fetchall()
+            await cur.execute(
+                f"SELECT winner_team, loser_team FROM ("
+                f"  SELECT winner_team, loser_team, student_codename,"
+                f"         ROW_NUMBER() OVER (PARTITION BY student_codename ORDER BY created_at DESC) AS rn"
+                f"  FROM {RESULTS_TABLE}"
+                f"  WHERE winner_team <> '' AND loser_team <> ''"
+                f") sub WHERE rn <= 100"
+            )
+            results = await cur.fetchall()
 
     team_names = [r["team_name"] for r in teams]
     if not team_names:
@@ -299,43 +304,46 @@ async def admin_logout():
 async def list_teams(request: Request):
     _require_admin(request)
     async with get_conn() as conn:
-        rows = await conn.fetch(
-            f"SELECT id, team_name, api_url, enabled FROM {TEAMS_TABLE} ORDER BY id"
-        )
-    return [dict(r) for r in rows]
+        async with conn.cursor() as cur:
+            await cur.execute(f"SELECT id, team_name, api_url, enabled FROM {TEAMS_TABLE} ORDER BY id")
+            return await cur.fetchall()
 
 
 @app.post("/api/teams", status_code=201)
 async def create_team(request: Request, team: TeamRequest):
     _require_admin(request)
     async with get_conn() as conn:
-        row = await conn.fetchrow(
-            f"INSERT INTO {TEAMS_TABLE} (team_name, api_url, enabled) VALUES ($1, $2, $3) RETURNING id, team_name, api_url, enabled",
-            team.team_name.strip(), team.api_url.strip(), team.enabled,
-        )
-    return dict(row)
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"INSERT INTO {TEAMS_TABLE} (team_name, api_url, enabled) VALUES (%s, %s, %s) RETURNING id, team_name, api_url, enabled",
+                (team.team_name.strip(), team.api_url.strip(), team.enabled),
+            )
+            return await cur.fetchone()
 
 
 @app.patch("/api/teams/{team_id}")
 async def update_team(team_id: int, request: Request, team: TeamRequest):
     _require_admin(request)
     async with get_conn() as conn:
-        row = await conn.fetchrow(
-            f"UPDATE {TEAMS_TABLE} SET team_name=$1, api_url=$2, enabled=$3 WHERE id=$4 RETURNING id, team_name, api_url, enabled",
-            team.team_name.strip(), team.api_url.strip(), team.enabled, team_id,
-        )
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"UPDATE {TEAMS_TABLE} SET team_name=%s, api_url=%s, enabled=%s WHERE id=%s RETURNING id, team_name, api_url, enabled",
+                (team.team_name.strip(), team.api_url.strip(), team.enabled, team_id),
+            )
+            row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Team not found")
-    return dict(row)
+    return row
 
 
 @app.delete("/api/teams/{team_id}", status_code=204)
 async def delete_team(team_id: int, request: Request):
     _require_admin(request)
     async with get_conn() as conn:
-        result = await conn.execute(f"DELETE FROM {TEAMS_TABLE} WHERE id=$1", team_id)
-    if result == "DELETE 0":
-        raise HTTPException(status_code=404, detail="Team not found")
+        async with conn.cursor() as cur:
+            await cur.execute(f"DELETE FROM {TEAMS_TABLE} WHERE id=%s", (team_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Team not found")
 
 
 # ---------------------------------------------------------------------------
@@ -346,10 +354,9 @@ async def delete_team(team_id: int, request: Request):
 async def list_students(request: Request):
     _require_admin(request)
     async with get_conn() as conn:
-        rows = await conn.fetch(
-            f"SELECT id, student_id, name, team_id FROM {STUDENTS_TABLE} ORDER BY team_id, name"
-        )
-    return [dict(r) for r in rows]
+        async with conn.cursor() as cur:
+            await cur.execute(f"SELECT id, student_id, name, team_id FROM {STUDENTS_TABLE} ORDER BY team_id, name")
+            return await cur.fetchall()
 
 
 @app.post("/api/students/upload", status_code=201)
@@ -385,11 +392,12 @@ async def upload_students(request: Request, file: UploadFile):
         rows.append((sid, name, team_id))
 
     async with get_conn() as conn:
-        await conn.executemany(
-            f"INSERT INTO {STUDENTS_TABLE} (student_id, name, team_id) VALUES ($1, $2, $3) "
-            f"ON CONFLICT (student_id) DO UPDATE SET name=EXCLUDED.name, team_id=EXCLUDED.team_id",
-            rows,
-        )
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                f"INSERT INTO {STUDENTS_TABLE} (student_id, name, team_id) VALUES (%s, %s, %s) "
+                f"ON CONFLICT (student_id) DO UPDATE SET name=EXCLUDED.name, team_id=EXCLUDED.team_id",
+                rows,
+            )
     return {"inserted": len(rows)}
 
 
@@ -397,18 +405,21 @@ async def upload_students(request: Request, file: UploadFile):
 async def clear_students(request: Request):
     _require_admin(request)
     async with get_conn() as conn:
-        await conn.execute(f"DELETE FROM {STUDENTS_TABLE}")
+        async with conn.cursor() as cur:
+            await cur.execute(f"DELETE FROM {STUDENTS_TABLE}")
 
 
 @app.get("/api/students/{student_id}")
 async def get_student(student_id: str):
     async with get_conn() as conn:
-        row = await conn.fetchrow(
-            f"SELECT student_id, name, team_id FROM {STUDENTS_TABLE} WHERE student_id=$1", student_id
-        )
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"SELECT student_id, name, team_id FROM {STUDENTS_TABLE} WHERE student_id=%s", (student_id,)
+            )
+            row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Student ID not found")
-    return dict(row)
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -417,34 +428,40 @@ async def get_student(student_id: str):
 
 async def _fetch_teams(student_team: str):
     async with get_conn() as conn:
-        if student_team:
-            return await conn.fetch(
-                f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
-                f"WHERE enabled = TRUE AND team_name <> $1 ORDER BY random() LIMIT 2",
-                student_team,
-            )
-        return await conn.fetch(
-            f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
-            f"WHERE enabled = TRUE ORDER BY random() LIMIT 2"
-        )
+        async with conn.cursor() as cur:
+            if student_team:
+                await cur.execute(
+                    f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
+                    f"WHERE enabled = TRUE AND team_name <> %s ORDER BY random() LIMIT 2",
+                    (student_team,),
+                )
+            else:
+                await cur.execute(
+                    f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} "
+                    f"WHERE enabled = TRUE ORDER BY random() LIMIT 2"
+                )
+            return await cur.fetchall()
 
 
 async def _record_result(round_id, student_id, prefs, winner, loser, winner_rec, loser_rec):
     async with get_conn() as conn:
-        await conn.execute(
-            f"INSERT INTO {RESULTS_TABLE} ("
-            "round_id, student_codename, student_preferences, "
-            "winner_team, loser_team, winner_api_url, loser_api_url, "
-            "winner_tmdb_id, loser_tmdb_id, winner_description, loser_description"
-            ") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
-            round_id, student_id, prefs,
-            winner["team_name"], loser["team_name"],
-            winner["api_url"], loser["api_url"],
-            int(winner_rec.get("tmdb_id", -1)),
-            int(loser_rec.get("tmdb_id", -1)),
-            str(winner_rec.get("description", "")),
-            str(loser_rec.get("description", "")),
-        )
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"INSERT INTO {RESULTS_TABLE} ("
+                "round_id, student_codename, student_preferences, "
+                "winner_team, loser_team, winner_api_url, loser_api_url, "
+                "winner_tmdb_id, loser_tmdb_id, winner_description, loser_description"
+                ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    round_id, student_id, prefs,
+                    winner["team_name"], loser["team_name"],
+                    winner["api_url"], loser["api_url"],
+                    int(winner_rec.get("tmdb_id", -1)),
+                    int(loser_rec.get("tmdb_id", -1)),
+                    str(winner_rec.get("description", "")),
+                    str(loser_rec.get("description", "")),
+                ),
+            )
 
 
 @app.get("/api/session/round")
@@ -519,23 +536,26 @@ async def submit_vote(vote: VoteRequest):
     loser = vote.right if vote.winner_side == "left" else vote.left
 
     async with get_conn() as conn:
-        await conn.execute(
-            f"INSERT INTO {RESULTS_TABLE} ("
-            "round_id, student_codename, student_preferences, "
-            "winner_team, loser_team, winner_api_url, loser_api_url, "
-            "winner_tmdb_id, loser_tmdb_id, winner_description, loser_description"
-            ") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
-            vote.round_id,
-            vote.student_id.strip(),
-            vote.preferences.strip(),
-            winner.get("team", {}).get("name", ""),
-            loser.get("team", {}).get("name", ""),
-            winner.get("team", {}).get("api_url", ""),
-            loser.get("team", {}).get("api_url", ""),
-            int(winner.get("recommendation", {}).get("tmdb_id", -1)),
-            int(loser.get("recommendation", {}).get("tmdb_id", -1)),
-            str(winner.get("recommendation", {}).get("description", "")),
-            str(loser.get("recommendation", {}).get("description", "")),
-        )
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"INSERT INTO {RESULTS_TABLE} ("
+                "round_id, student_codename, student_preferences, "
+                "winner_team, loser_team, winner_api_url, loser_api_url, "
+                "winner_tmdb_id, loser_tmdb_id, winner_description, loser_description"
+                ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    vote.round_id,
+                    vote.student_id.strip(),
+                    vote.preferences.strip(),
+                    winner.get("team", {}).get("name", ""),
+                    loser.get("team", {}).get("name", ""),
+                    winner.get("team", {}).get("api_url", ""),
+                    loser.get("team", {}).get("api_url", ""),
+                    int(winner.get("recommendation", {}).get("tmdb_id", -1)),
+                    int(loser.get("recommendation", {}).get("tmdb_id", -1)),
+                    str(winner.get("recommendation", {}).get("description", "")),
+                    str(loser.get("recommendation", {}).get("description", "")),
+                ),
+            )
 
     return {"ok": True}

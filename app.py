@@ -273,6 +273,15 @@ def judge_page(request: Request):
     })
 
 
+@app.get("/preview", response_class=HTMLResponse)
+def preview_page(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/admin?error=Please+log+in+to+access+the+preview", status_code=303)
+    return templates.TemplateResponse(request, "preview.html", {
+        "movies_json": MOVIES_JSON,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Admin auth
 # ---------------------------------------------------------------------------
@@ -299,6 +308,64 @@ async def admin_logout():
 # ---------------------------------------------------------------------------
 # Teams API (admin)
 # ---------------------------------------------------------------------------
+
+@app.get("/api/teams/public")
+async def list_teams_public(request: Request):
+    _require_admin(request)
+    async with get_conn() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(f"SELECT id, team_name FROM {TEAMS_TABLE} WHERE enabled = TRUE ORDER BY team_name")
+            return await cur.fetchall()
+
+
+@app.get("/api/preview")
+async def get_preview(request: Request, preferences: str = Query(default=""), team_ids: list[int] = Query(default=[])):
+    _require_admin(request)
+    prefs = preferences.strip()
+    if not prefs:
+        raise HTTPException(status_code=400, detail="Please enter your preferences")
+    if not team_ids:
+        raise HTTPException(status_code=400, detail="Please select at least one team")
+
+    async with get_conn() as conn:
+        async with conn.cursor() as cur:
+            placeholders = ",".join(["%s"] * len(team_ids))
+            await cur.execute(
+                f"SELECT id, team_name, api_url FROM {TEAMS_TABLE} WHERE id IN ({placeholders}) AND enabled = TRUE",
+                team_ids,
+            )
+            teams = await cur.fetchall()
+
+    if not teams:
+        raise HTTPException(status_code=400, detail="No valid teams found")
+
+    req_payload = {"user_id": 0, "preferences": prefs, "history": []}
+
+    async with httpx.AsyncClient() as client:
+        api_results = await asyncio.gather(
+            *[call_team_api(client, team["api_url"], req_payload) for team in teams],
+            return_exceptions=True,
+        )
+
+    output = []
+    for team, result in zip(teams, api_results):
+        if isinstance(result, Exception):
+            output.append({
+                "team_id": team["id"],
+                "team_name": team["team_name"],
+                "error": str(result),
+                "recommendation": None,
+            })
+        else:
+            output.append({
+                "team_id": team["id"],
+                "team_name": team["team_name"],
+                "error": None,
+                "recommendation": enrich_recommendation(result),
+            })
+
+    return {"results": output}
+
 
 @app.get("/api/teams")
 async def list_teams(request: Request):

@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Team Preview</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #0f766e;
+      --accent-2: #0b5f57;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef6ff 0%, #f5f7fb 42%, #f9fafb 100%);
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+      padding: 1.2rem;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    h1 { margin: 0; font-size: 1.35rem; }
+    h2 { margin: 0; font-size: 1.05rem; }
+    p { margin: 0.55rem 0; line-height: 1.42; }
+    small { color: var(--muted); }
+    .prefs-box {
+      margin-bottom: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 0.8rem 0.95rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+    .prefs-section label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      font-size: 0.9rem;
+    }
+    .prefs-section textarea {
+      width: 100%;
+      min-height: 80px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.5rem 0.6rem;
+      font: inherit;
+      resize: vertical;
+    }
+    .movie-picker { position: relative; }
+    .movie-search {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.5rem 0.6rem;
+      font: inherit;
+    }
+    .movie-dropdown {
+      position: absolute;
+      z-index: 100;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      width: 100%;
+      max-height: 220px;
+      overflow-y: auto;
+      list-style: none;
+      margin: 2px 0 0;
+      padding: 0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .movie-dropdown.hidden { display: none; }
+    .movie-dropdown li {
+      padding: 0.45rem 0.7rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .movie-dropdown li:hover { background: #f0fdfa; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.5rem;
+    }
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: #f0fdfa;
+      border: 1px solid #99f6e4;
+      border-radius: 20px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.82rem;
+      color: #0f766e;
+    }
+    .chip button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #0f766e;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0;
+    }
+    /* Team checkboxes */
+    .team-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .team-check {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.35rem 0.65rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+      background: #fff;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .team-check input[type="checkbox"] { accent-color: var(--accent); }
+    .team-check:has(input:checked) {
+      border-color: var(--accent);
+      background: #f0fdfa;
+    }
+    .btn-fetch {
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.6rem 1.1rem;
+      cursor: pointer;
+      font-weight: 600;
+      font: inherit;
+      font-size: 1rem;
+    }
+    .btn-fetch:hover { background: var(--accent-2); }
+    .btn-fetch:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      margin-top: 0.5rem;
+      border: 1px solid #bae6fd;
+      background: #ecfeff;
+      border-radius: 10px;
+      padding: 0.65rem 0.95rem;
+      font-size: 0.9rem;
+    }
+    .status.ok { border-color: #99f6e4; background: #f0fdfa; color: #0f766e; }
+    .status.err { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .result-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.95rem;
+    }
+    .result-card .team-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      margin-bottom: 0.4rem;
+    }
+    .result-card .movie-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+    }
+    .result-card .movie-desc {
+      font-size: 0.9rem;
+      color: var(--ink);
+      line-height: 1.45;
+    }
+    .result-card .movie-poster {
+      width: 100%;
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
+      object-fit: cover;
+      max-height: 260px;
+    }
+    .result-card.error-card {
+      border-color: #fca5a5;
+      background: #fef2f2;
+    }
+    .result-card.error-card .error-msg {
+      color: #991b1b;
+      font-size: 0.88rem;
+    }
+    .top { margin-bottom: 1rem; }
+    .top a { font-size: 0.85rem; color: var(--accent); text-decoration: none; }
+    .top a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <h1>Team Preview</h1>
+      <p style="color:var(--muted);margin:0.2rem 0 0;font-size:0.9rem;">
+        See what each team recommends based on your preferences.
+        <a href="/judge">Go to Judge UI</a>
+      </p>
+    </div>
+
+    <div class="prefs-box">
+      <h2>Your preferences</h2>
+      <div class="prefs-section">
+        <label for="prefsBlurb">What kinds of movies do you like?</label>
+        <textarea id="prefsBlurb" placeholder="e.g. I love tense thrillers and smart sci-fi with morally complex characters"></textarea>
+      </div>
+      <div class="prefs-section">
+        <label>Movies you've liked</label>
+        <div class="movie-picker">
+          <input id="movieSearch" type="text" class="movie-search" placeholder="Search titles..." autocomplete="off" />
+          <ul id="movieDropdown" class="movie-dropdown hidden"></ul>
+        </div>
+        <div id="selectedChips" class="chips"></div>
+      </div>
+    </div>
+
+    <div class="prefs-box">
+      <h2>Select teams</h2>
+      <div id="teamGrid" class="team-grid">
+        <span style="color:var(--muted);font-size:0.9rem;">Loading teams...</span>
+      </div>
+      <div>
+        <button id="fetchBtn" class="btn-fetch" disabled>Fetch recommendations</button>
+      </div>
+      <div id="status" class="status" style="display:none;"></div>
+    </div>
+
+    <div id="resultsGrid" class="results-grid"></div>
+  </div>
+
+  <script>
+    const allMovies = {{ movies_json | safe }};
+    let selectedMovies = [];
+    let teams = [];
+
+    function esc(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    // ── Preferences (shared with judge via localStorage) ──
+
+    function buildPreferences() {
+      const blurb = document.getElementById("prefsBlurb").value.trim();
+      const movieLabels = selectedMovies.map(m => m.year ? `${m.title} (${m.year})` : m.title).join(", ");
+      const parts = [];
+      if (blurb) parts.push(blurb);
+      if (movieLabels) parts.push("Liked movies: " + movieLabels);
+      return parts.join("\n\n");
+    }
+
+    function savePrefs() {
+      localStorage.setItem("judge_blurb", document.getElementById("prefsBlurb").value);
+      localStorage.setItem("judge_movies", JSON.stringify(selectedMovies));
+    }
+
+    function renderChips() {
+      const container = document.getElementById("selectedChips");
+      container.innerHTML = "";
+      selectedMovies.forEach(m => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        const label = m.year ? `${m.title} (${m.year})` : m.title;
+        chip.innerHTML = `${label} <button aria-label="Remove">&times;</button>`;
+        chip.querySelector("button").addEventListener("click", () => {
+          selectedMovies = selectedMovies.filter(x => x.tmdb_id !== m.tmdb_id);
+          renderChips();
+          savePrefs();
+        });
+        container.appendChild(chip);
+      });
+    }
+
+    function setupMoviePicker() {
+      const searchInput = document.getElementById("movieSearch");
+      const dropdown = document.getElementById("movieDropdown");
+
+      function updateDropdown() {
+        const q = searchInput.value.trim().toLowerCase();
+        dropdown.innerHTML = "";
+        const matches = allMovies
+          .filter(m => !selectedMovies.find(s => s.tmdb_id === m.tmdb_id) && (!q || m.title.toLowerCase().includes(q)));
+        if (!matches.length) { dropdown.classList.add("hidden"); return; }
+        matches.slice(0, 80).forEach(m => {
+          const li = document.createElement("li");
+          li.textContent = m.year ? `${m.title} (${m.year})` : m.title;
+          li.addEventListener("click", () => {
+            selectedMovies.push(m);
+            renderChips();
+            savePrefs();
+            searchInput.value = "";
+            dropdown.classList.add("hidden");
+          });
+          dropdown.appendChild(li);
+        });
+        dropdown.classList.remove("hidden");
+      }
+
+      searchInput.addEventListener("input", updateDropdown);
+      searchInput.addEventListener("focus", updateDropdown);
+      document.addEventListener("click", e => {
+        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+          dropdown.classList.add("hidden");
+        }
+      });
+    }
+
+    // Restore saved preferences
+    const savedBlurb = localStorage.getItem("judge_blurb");
+    const savedMovies = localStorage.getItem("judge_movies");
+    if (savedBlurb) document.getElementById("prefsBlurb").value = savedBlurb;
+    if (savedMovies) try { selectedMovies = JSON.parse(savedMovies); renderChips(); } catch (_) {}
+    document.getElementById("prefsBlurb").addEventListener("input", savePrefs);
+    setupMoviePicker();
+
+    // ── Teams ──
+
+    async function loadTeams() {
+      try {
+        const res = await fetch("/api/teams/public");
+        teams = await res.json();
+        renderTeamGrid();
+        document.getElementById("fetchBtn").disabled = false;
+      } catch (e) {
+        document.getElementById("teamGrid").innerHTML = `<span style="color:#991b1b">Could not load teams.</span>`;
+      }
+    }
+
+    function renderTeamGrid() {
+      const grid = document.getElementById("teamGrid");
+      if (!teams.length) {
+        grid.innerHTML = `<span style="color:var(--muted)">No enabled teams found.</span>`;
+        return;
+      }
+      grid.innerHTML = "";
+      teams.forEach(t => {
+        const label = document.createElement("label");
+        label.className = "team-check";
+        label.innerHTML = `<input type="checkbox" value="${t.id}" /> ${esc(t.team_name)}`;
+        grid.appendChild(label);
+      });
+    }
+
+    function selectedTeamIds() {
+      return Array.from(document.querySelectorAll(".team-check input:checked")).map(el => el.value);
+    }
+
+    // ── Fetch & display ──
+
+    function setStatus(msg, cls) {
+      const el = document.getElementById("status");
+      el.style.display = msg ? "" : "none";
+      el.className = "status" + (cls ? " " + cls : "");
+      el.textContent = msg;
+    }
+
+    function renderResults(results) {
+      const grid = document.getElementById("resultsGrid");
+      grid.innerHTML = "";
+      results.forEach(item => {
+        const card = document.createElement("div");
+        if (item.error) {
+          card.className = "result-card error-card";
+          card.innerHTML = `<div class="team-label">${esc(item.team_name)}</div>
+            <div class="error-msg">Error: ${esc(item.error)}</div>`;
+        } else {
+          const r = item.recommendation;
+          card.className = "result-card";
+          const posterHtml = r.poster_url
+            ? `<img class="movie-poster" src="${esc(r.poster_url)}" alt="Poster" loading="lazy" />`
+            : "";
+          const titleText = r.year ? `${r.title} (${r.year})` : r.title;
+          card.innerHTML = `<div class="team-label">${esc(item.team_name)}</div>
+            ${posterHtml}
+            <div class="movie-title">${esc(titleText)}</div>
+            <div class="movie-desc">${esc(r.description)}</div>`;
+        }
+        grid.appendChild(card);
+      });
+    }
+
+    document.getElementById("fetchBtn").addEventListener("click", async () => {
+      const prefs = buildPreferences();
+      if (!prefs) {
+        setStatus("Please describe what you like or select some liked movies.", "err");
+        return;
+      }
+      const ids = selectedTeamIds();
+      if (!ids.length) {
+        setStatus("Please select at least one team.", "err");
+        return;
+      }
+
+      document.getElementById("fetchBtn").disabled = true;
+      document.getElementById("resultsGrid").innerHTML = "";
+      setStatus("Fetching recommendations...");
+
+      try {
+        const params = new URLSearchParams();
+        params.set("preferences", prefs);
+        ids.forEach(id => params.append("team_ids", id));
+        const res = await fetch(`/api/preview?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        setStatus("Done.", "ok");
+        renderResults(data.results);
+      } catch (e) {
+        setStatus(`Error: ${e.message}`, "err");
+      } finally {
+        document.getElementById("fetchBtn").disabled = false;
+      }
+    });
+
+    loadTeams();
+  </script>
+</body>
+</html>

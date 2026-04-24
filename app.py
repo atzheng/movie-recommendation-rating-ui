@@ -121,7 +121,7 @@ def enrich_recommendation(raw: dict[str, Any]) -> dict[str, Any]:
 async def call_team_api(
     client: httpx.AsyncClient, api_url: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    resp = await client.post(f"{api_url}/recommend", json=payload, timeout=8.0)
+    resp = await client.post(f"{api_url}/recommend", json=payload, timeout=60.0)
     if resp.status_code >= 300:
         raise ValueError(f"Team API failed ({api_url}): HTTP {resp.status_code}")
     body = resp.json()

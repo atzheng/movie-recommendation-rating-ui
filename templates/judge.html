@@ -397,6 +397,29 @@
         const res = await fetch(url);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+        // Auto-award if exactly one side is already in the user's watch list
+        const leftInList = selectedMovies.some(m => m.tmdb_id === data.left.recommendation.tmdb_id);
+        const rightInList = selectedMovies.some(m => m.tmdb_id === data.right.recommendation.tmdb_id);
+        if (leftInList !== rightInList) {
+          const winnerSide = leftInList ? "right" : "left";
+          statusEl.textContent = "One recommendation was already in your watch list — auto-awarding the other team and fetching a new round...";
+          await fetch(`/api/session/vote`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              round_id: data.round_id,
+              winner_side: winnerSide,
+              left: data.left,
+              right: data.right,
+              preferences: data.preferences || "",
+              student_id: currentStudent ? currentStudent.student_id : ""
+            })
+          });
+          await loadRound();
+          return;
+        }
+
         currentRound = data;
         renderSide("left", data.left);
         renderSide("right", data.right);

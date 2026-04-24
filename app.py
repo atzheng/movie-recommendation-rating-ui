@@ -9,6 +9,7 @@ import re
 from collections import defaultdict
 from typing import Any
 import contextlib
+import ssl
 
 import choix
 import httpx
@@ -32,6 +33,13 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 ADMIN_COOKIE = "rating_admin"
 
 POSTER_BASE_URL = "https://image.tmdb.org/t/p/w342"
+
+def _permissive_ssl_ctx() -> ssl.SSLContext:
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.set_ciphers("ALL:@SECLEVEL=0")
+    return ctx
 TMDB_CSV_PATH = os.environ.get(
     "TMDB_CSV_PATH",
     os.path.join(os.path.dirname(__file__), "tmdb_top1000_movies.csv"),
@@ -341,7 +349,7 @@ async def get_preview(request: Request, preferences: str = Query(default=""), te
 
     req_payload = {"user_id": 0, "preferences": prefs, "history": []}
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=_permissive_ssl_ctx()) as client:
         api_results = await asyncio.gather(
             *[call_team_api(client, team["api_url"], req_payload) for team in teams],
             return_exceptions=True,
@@ -547,7 +555,7 @@ async def get_round(preferences: str = Query(default=""), student_team: str = Qu
 
         left_team, right_team = teams[0], teams[1]
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_permissive_ssl_ctx()) as client:
             left_raw, right_raw = await asyncio.gather(
                 call_team_api(client, left_team["api_url"], req_payload),
                 call_team_api(client, right_team["api_url"], req_payload),
